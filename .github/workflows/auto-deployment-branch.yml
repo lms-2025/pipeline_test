@@ -1,4 +1,4 @@
-name: Auto Deployment Branch Creation
+name: Auto Deployment Branch on Issue Creation
 
 on:
   issues:
@@ -8,48 +8,60 @@ on:
 jobs:
   create-deployment-branch:
     runs-on: ubuntu-latest
-
-    if: github.event.issue.project_card != null  # Proceed only if the issue is linked to a GitHub Project
+    if: startsWith(github.event.issue.title, "Deployment")
 
     steps:
-      - name: Extract Issue Details
-        id: issue-details
+      - name: Check if the issue is linked to a GitHub Project
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        id: check_project
         run: |
-          echo "Extracting issue details..."
-          ISSUE_TITLE="${{ github.event.issue.title }}"
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
-          SAFE_BRANCH_NAME=$(echo "deploy/issue-${ISSUE_NUMBER}-${ISSUE_TITLE}" | tr -cd '[:alnum:]-_')
-          echo "Generated branch name: $SAFE_BRANCH_NAME"
-          echo "branch_name=$SAFE_BRANCH_NAME" >> $GITHUB_ENV
+          echo "Checking if the issue is linked to a GitHub Project..."
+          PROJECTS_URL=$(jq -r '.issue.projects_url' <<<"${{ toJson(github.event) }}")
 
-      - name: Configure Git
+          # Fetch the associated projects
+          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" $PROJECTS_URL)
+
+          if [[ $(jq '. | length' <<<"$RESPONSE") -eq 0 ]]; then
+            echo "❌ Issue is not linked to any GitHub Project. Exiting."
+            exit 0
+          fi
+
+          echo "✅ Issue is linked to a GitHub Project."
+
+      - name: Create a deployment branch
+        id: create_branch
         run: |
+          echo "Creating a deployment branch for the issue..."
+
+          ISSUE_NUMBER=${{ github.event.issue.number }}
+          ISSUE_TITLE=${{ github.event.issue.title }}
+          BRANCH_NAME="deployment/issue-${ISSUE_NUMBER}"
+
+          echo "Branch name: $BRANCH_NAME"
+
+          # Create the branch
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin
+          git checkout -b $BRANCH_NAME origin/main
+          git push origin $BRANCH_NAME
 
-      - name: Create Deployment Branch
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_ENV
+
+      - name: Add branch name to issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH_NAME=${{ env.branch_name }}
-          echo "Creating branch $BRANCH_NAME..."
-          git fetch origin main
-          git checkout -b "$BRANCH_NAME" origin/main
-          git push origin "$BRANCH_NAME"
-
-      - name: Comment on Issue
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
+          echo "Adding branch name to the issue..."
+          BRANCH_NAME="${{ env.branch_name }}"
           ISSUE_NUMBER=${{ github.event.issue.number }}
-          BRANCH_NAME=${{ env.branch_name }}
-          COMMENT_BODY="🚀 Deployment branch **$BRANCH_NAME** has been created for this issue."
           curl -X POST \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER/comments \
+            https://api.github.com/repos/${{ github.repository }}/issues/${ISSUE_NUMBER}/comments \
             -d @- <<EOF
           {
-            "body": "$COMMENT_BODY"
+            "body": "A deployment branch has been created for this issue: \`$BRANCH_NAME\`."
           }
 EOF
