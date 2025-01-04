@@ -64,4 +64,3 @@ jobs:
           {
             "body": "A deployment branch has been created for this issue: \`$BRANCH_NAME\`."
           }
-EOF
