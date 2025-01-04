@@ -8,8 +8,6 @@ on:
 jobs:
   create-deployment-branch:
     runs-on: ubuntu-latest
-    if: startsWith(github.event.issue.title, "Deployment")
-
     steps:
       - name: Check if the issue is linked to a GitHub Project
         env:
